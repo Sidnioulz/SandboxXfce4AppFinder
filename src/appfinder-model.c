@@ -2070,6 +2070,8 @@ gboolean
 xfce_appfinder_model_execute (XfceAppfinderModel  *model,
                               const GtkTreeIter   *iter,
                               GdkScreen           *screen,
+                              gboolean             sandboxed,
+                              const gchar         *profile,
                               gboolean            *is_regular_command,
                               GError             **error)
 {
@@ -2101,7 +2103,17 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
       return FALSE;
     }
 
-  string = g_string_sized_new (100);
+  string = g_string_sized_new (200);
+
+    
+  APPFINDER_DEBUG ("spawn \"%s\"%s", command, sandboxed? " sandboxed":"");
+  if (sandboxed)
+    {
+      if (profile)
+        g_string_append_printf (string, "firejail --helper --debug --profile=/etc/firejail/%s.profile ", profile);
+      else
+        g_string_append (string, "firejail --helper --debug ");
+    }
 
   if (garcon_menu_item_requires_terminal (item))
     g_string_append (string, "exo-open --launch TerminalEmulator ");
@@ -2127,7 +2139,8 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
     }
 
   if (g_shell_parse_argv (string->str, NULL, &argv, error))
-    {
+    {//TODO sandboxed
+    
       succeed = xfce_spawn_on_screen (screen, garcon_menu_item_get_path (item),
                                       argv, NULL, G_SPAWN_SEARCH_PATH,
                                       garcon_menu_item_supports_startup_notification (item),

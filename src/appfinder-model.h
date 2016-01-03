@@ -83,6 +83,8 @@ gboolean             xfce_appfinder_model_get_visible_command    (XfceAppfinderM
 gboolean             xfce_appfinder_model_execute                (XfceAppfinderModel        *model,
                                                                   const GtkTreeIter         *iter,
                                                                   GdkScreen                 *screen,
+                                                                  gboolean                   sandboxed,
+                                                                  const gchar               *profile,
                                                                   gboolean                  *is_regular_command,
                                                                   GError                   **error);
 

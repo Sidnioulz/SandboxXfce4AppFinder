@@ -40,6 +40,8 @@
 #include <src/appfinder-actions.h>
 #include <src/appfinder-private.h>
 
+#include <firejail/exechelper.h>
+
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #define APPFINDER_WIDGET_XID(widget) ((guint) GDK_WINDOW_XID (gtk_widget_get_window (GTK_WIDGET (widget))))
@@ -108,9 +110,11 @@ static gboolean   xfce_appfinder_window_item_visible                  (GtkTreeMo
 static void       xfce_appfinder_window_item_changed                  (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_row_activated                 (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_icon_theme_changed            (XfceAppfinderWindow         *window);
+static void       xfce_appfinder_window_launch_sandboxed_clicked      (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_launch_clicked                (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_execute                       (XfceAppfinderWindow         *window,
-                                                                       gboolean                     close_on_succeed);
+                                                                       gboolean                     close_on_succeed,
+                                                                       gboolean                     sandboxed);
 
 
 
@@ -146,6 +150,7 @@ struct _XfceAppfinderWindow
 
   GtkWidget                  *bbox;
   GtkWidget                  *button_launch;
+  GtkWidget                  *button_launch_sandboxed;
   GtkWidget                  *button_preferences;
   GtkWidget                  *bin_collapsed;
   GtkWidget                  *bin_expanded;
@@ -369,30 +374,23 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
 #endif
   gtk_widget_show (hbox);
 
+  /* preferences button */
   window->button_preferences = button = gtk_button_new_from_stock (GTK_STOCK_PREFERENCES);
   gtk_box_pack_start (GTK_BOX (hbox), button, FALSE, FALSE, 0);
   g_signal_connect (G_OBJECT (button), "clicked",
       G_CALLBACK (xfce_appfinder_window_preferences), window);
 
 #if GTK_CHECK_VERSION (3, 0, 0)
-  bbox = gtk_button_box_new (GTK_ORIENTATION_HORIZONTAL);
-  gtk_box_set_spacing (GTK_BOX (bbox), 6);
+  bbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
 #else
-  bbox = gtk_hbutton_box_new ();
-  gtk_button_box_set_spacing (GTK_BUTTON_BOX (bbox), 6);
+  bbox = gtk_hbox_new (FALSE, 6);
 #endif
-  gtk_button_box_set_layout (GTK_BUTTON_BOX (bbox), GTK_BUTTONBOX_END);
   gtk_box_pack_start (GTK_BOX (hbox), bbox, TRUE, TRUE, 0);
   gtk_widget_show (bbox);
 
-  button = gtk_button_new_from_stock (GTK_STOCK_CLOSE);
-  gtk_container_add (GTK_CONTAINER (bbox), button);
-  g_signal_connect_swapped (G_OBJECT (button), "clicked",
-      G_CALLBACK (gtk_widget_destroy), window);
-  gtk_widget_show (button);
-
+  /* launch button */
   window->button_launch = button = gtk_button_new_with_mnemonic (_("La_unch"));
-  gtk_container_add (GTK_CONTAINER (bbox), button);
+  gtk_box_pack_end (GTK_BOX (bbox), button, FALSE, FALSE, 0);
   g_signal_connect_swapped (G_OBJECT (button), "clicked",
       G_CALLBACK (xfce_appfinder_window_launch_clicked), window);
   gtk_widget_set_sensitive (button, FALSE);
@@ -401,6 +399,25 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   image = gtk_image_new_from_stock (GTK_STOCK_EXECUTE, GTK_ICON_SIZE_BUTTON);
   gtk_button_set_image (GTK_BUTTON (button), image);
 
+  /* launch sandboxed button */
+  window->button_launch_sandboxed = button = gtk_button_new_with_mnemonic (_("Launch _Sandboxed"));
+  gtk_box_pack_end (GTK_BOX (bbox), button, FALSE, FALSE, 0);
+  g_signal_connect_swapped (G_OBJECT (button), "clicked",
+      G_CALLBACK (xfce_appfinder_window_launch_sandboxed_clicked), window);
+  gtk_widget_set_sensitive (button, FALSE);
+  gtk_widget_show (button);
+
+  image = gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON);
+  gtk_button_set_image (GTK_BUTTON (button), image);
+  
+  /* close button */
+  button = gtk_button_new_from_stock (GTK_STOCK_CLOSE);
+  gtk_box_pack_end (GTK_BOX (bbox), button, FALSE, FALSE, 0);
+  g_signal_connect_swapped (G_OBJECT (button), "clicked",
+      G_CALLBACK (gtk_widget_destroy), window);
+  gtk_widget_show (button);
+
+  /* load icon theme */
   window->icon_theme = gtk_icon_theme_get_for_screen (gtk_window_get_screen (GTK_WINDOW (window)));
   g_signal_connect_swapped (G_OBJECT (window->icon_theme), "changed",
       G_CALLBACK (xfce_appfinder_window_icon_theme_changed), window);
@@ -852,7 +869,7 @@ static void
 xfce_appfinder_window_popup_menu_execute (GtkWidget           *mi,
                                           XfceAppfinderWindow *window)
 {
-  xfce_appfinder_window_execute (window, FALSE);
+  xfce_appfinder_window_execute (window, FALSE, FALSE);
 }
 
 
@@ -1180,6 +1197,7 @@ xfce_appfinder_window_entry_changed_idle (gpointer data)
   else
     {
       gtk_widget_set_sensitive (window->button_launch, IS_STRING (text));
+      gtk_widget_set_sensitive (window->button_launch_sandboxed, IS_STRING (text));
 
       pixbuf = xfce_appfinder_model_get_icon_for_command (window->model, text);
       xfce_appfinder_window_update_image (window, pixbuf);
@@ -1246,7 +1264,7 @@ xfce_appfinder_window_entry_activate (GtkEditable         *entry,
       if (cursor_set)
         gtk_widget_grab_focus (window->view);
       else
-        xfce_appfinder_window_execute (window, TRUE);
+        xfce_appfinder_window_execute (window, TRUE, FALSE);
     }
   else if (gtk_widget_get_sensitive (window->button_launch))
     {
@@ -1575,6 +1593,7 @@ xfce_appfinder_window_item_changed (XfceAppfinderWindow *window)
     {
       can_launch = xfce_appfinder_window_view_get_selected (window, &model, &iter);
       gtk_widget_set_sensitive (window->button_launch, can_launch);
+      gtk_widget_set_sensitive (window->button_launch_sandboxed, can_launch);
 
       if (can_launch)
         {
@@ -1626,8 +1645,149 @@ xfce_appfinder_window_icon_theme_changed (XfceAppfinderWindow *window)
 
 
 
+static void
+populate_profile_box (GtkWidget *widget)
+{
+  GtkComboBoxText  *box   = (GtkComboBoxText *) widget;
+  GError           *error = NULL;
+  GList            *profiles = NULL, *lp;
+  GDir             *dir;
+  const gchar      *name;
+  gchar            *copy;
+
+  //TODO READ home TOO
+	// look for a profile in ~/.config/firejail directory
+  // if (asprintf(&usercfgdir, "%s/.config/firejail", cfg.homedir) == -1)
+
+  /* read the profile directory */
+  dir = g_dir_open ("/etc/firejail", 0, &error);
+  if (error)
+    {
+      TRACE ("Error: could not open \"/etc/firejail\" (%s)", error->message);
+      g_error_free (error);
+    }
+
+  errno = 0;
+  while ((name = g_dir_read_name (dir)) != NULL)
+    {
+      if (g_str_has_suffix (name, ".profile") &&
+          g_strcmp0 (EXECHELP_DEFAULT_USER_PROFILE ".profile", name) &&
+          g_strcmp0 (EXECHELP_DEFAULT_ROOT_PROFILE ".profile", name))
+        {
+          copy = g_strndup (name, strstr (name, ".profile") - name);
+          profiles = g_list_prepend (profiles, copy);
+        }
+    }
+  if (errno)
+    {
+      TRACE ("Error: could not read \"/etc/firejail\" entry (%s)", strerror (errno));
+    }
+
+  g_dir_close (dir);
+
+  /* we did not know the reading order in the directory */
+  profiles = g_list_sort (profiles, (GCompareFunc) g_strcmp0);
+  for (lp = profiles; lp != NULL; lp = lp->next)
+    {
+      gtk_combo_box_text_append_text (box, lp->data);
+      g_free (lp->data);
+    }
+  g_list_free (profiles);
+
+  gtk_combo_box_text_prepend_text (box, EXECHELP_DEFAULT_ROOT_PROFILE);
+  gtk_combo_box_text_prepend_text (box, EXECHELP_DEFAULT_USER_PROFILE);
+
+  gtk_combo_box_set_active (GTK_COMBO_BOX (box), 0);
+
+  return;
+}
+
+
+
+static gboolean
+xfce_appfinder_window_sandbox_options (XfceAppfinderWindow  *window,
+                                       const gchar          *text,
+                                       gchar               **profile)
+{
+
+  GtkWidget *dialog;
+  GtkWidget *widget, *box, *vbox, *profile_box;
+  gchar     *message;
+  gchar     *profile_box_content;
+  int        ret;
+
+  // construct dialog
+  dialog = gtk_dialog_new_with_buttons ("Launch Sandboxed Application",
+                                         GTK_WINDOW (window),
+                                         GTK_DIALOG_DESTROY_WITH_PARENT,
+                                         NULL);
+
+
+  /* close button */
+  widget = gtk_button_new_from_stock (GTK_STOCK_CANCEL);
+  gtk_dialog_add_action_widget (GTK_DIALOG (dialog), widget, GTK_RESPONSE_REJECT);
+
+  /* launch sandboxed button */
+  widget = gtk_button_new_with_mnemonic (_("_Launch"));
+  gtk_button_set_image (GTK_BUTTON (widget), gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON));
+  gtk_dialog_add_action_widget (GTK_DIALOG (dialog), widget, GTK_RESPONSE_ACCEPT);
+
+#if GTK_CHECK_VERSION (3, 0, 0)
+  vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+#else
+  vbox = gtk_vbox_new (FALSE, 6);
+#endif
+  gtk_container_add (GTK_CONTAINER (gtk_dialog_get_content_area(GTK_DIALOG(dialog))), vbox);
+
+  // create the dialog message
+  message = g_strdup_printf ("<b>Please select the profile with which to run '%s'</b>", text);
+  widget = gtk_label_new (message);
+  g_free (message);
+  gtk_label_set_use_markup (GTK_LABEL(widget), TRUE);
+  gtk_label_set_line_wrap (GTK_LABEL(widget), TRUE);
+
+  // pack up the widget
+#if GTK_CHECK_VERSION (3, 0, 0)
+  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+#else
+  box = gtk_vbox_new (FALSE, 6);
+#endif
+  gtk_box_pack_start (GTK_BOX (box), widget, FALSE, FALSE, 12);
+  gtk_box_pack_start (GTK_BOX (vbox), box, TRUE, TRUE, 12);
+
+  // Combo box for choosing profiles
+  profile_box = gtk_combo_box_text_new ();
+  populate_profile_box (profile_box);
+
+  // pack up the widget
+#if GTK_CHECK_VERSION (3, 0, 0)
+  box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+#else
+  box = gtk_vbox_new (FALSE, 6);
+#endif
+  gtk_box_pack_start (GTK_BOX (box), profile_box, FALSE, FALSE, 12);
+  gtk_box_pack_start (GTK_BOX (vbox), box, TRUE, TRUE, 12);
+
+  // and show it to the world...
+  gtk_widget_show_all (GTK_WIDGET(dialog));
+  ret = gtk_dialog_run (GTK_DIALOG(dialog));
+
+  if (ret == GTK_RESPONSE_ACCEPT)
+    {
+      profile_box_content = gtk_combo_box_text_get_active_text (GTK_COMBO_BOX_TEXT (profile_box));
+      *profile = profile_box_content? g_strdup (profile_box_content) : NULL;
+    }
+
+  gtk_widget_destroy (dialog);
+  return (ret == GTK_RESPONSE_ACCEPT);
+}
+
+
+
 static gboolean
 xfce_appfinder_window_execute_command (const gchar          *text,
+                                       gboolean              sandboxed,
+                                       const gchar          *profile,
                                        GdkScreen            *screen,
                                        XfceAppfinderWindow  *window,
                                        gboolean              only_custom_cmd,
@@ -1637,6 +1797,7 @@ xfce_appfinder_window_execute_command (const gchar          *text,
   gboolean  succeed = FALSE;
   gchar    *action_cmd = NULL;
   gchar    *expanded;
+  gchar    *sandbox_expanded;
 
   appfinder_return_val_if_fail (error != NULL && *error == NULL, FALSE);
   appfinder_return_val_if_fail (GDK_IS_SCREEN (screen), FALSE);
@@ -1662,8 +1823,20 @@ xfce_appfinder_window_execute_command (const gchar          *text,
       expanded = xfce_expand_variables (text, NULL);
 
       /* spawn the command */
-      APPFINDER_DEBUG ("spawn \"%s\"", expanded);
-      succeed = xfce_spawn_command_line_on_screen (screen, expanded, FALSE, FALSE, error);
+      APPFINDER_DEBUG ("spawn \"%s\"%s", expanded, sandboxed? " sandboxed":"");
+      if (sandboxed)
+        {
+          if (profile)
+            sandbox_expanded = g_strdup_printf ("firejail --helper --debug --profile=/etc/firejail/%s.profile %s", profile, expanded);
+          else
+            sandbox_expanded = g_strdup_printf ("firejail --helper --debug %s", expanded);
+          succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);
+          g_free (sandbox_expanded);
+        }
+      else
+        {
+          succeed = xfce_spawn_command_line_on_screen (screen, expanded, FALSE, FALSE, error);
+        }
       g_free (expanded);
     }
 
@@ -1675,16 +1848,25 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 
 
 static void
+xfce_appfinder_window_launch_sandboxed_clicked (XfceAppfinderWindow *window)
+{
+  xfce_appfinder_window_execute (window, TRUE, TRUE);
+}
+
+
+
+static void
 xfce_appfinder_window_launch_clicked (XfceAppfinderWindow *window)
 {
-  xfce_appfinder_window_execute (window, TRUE);
+  xfce_appfinder_window_execute (window, TRUE, FALSE);
 }
 
 
 
 static void
 xfce_appfinder_window_execute (XfceAppfinderWindow *window,
-                               gboolean             close_on_succeed)
+                               gboolean             close_on_succeed,
+                               gboolean             sandboxed)
 {
   GtkTreeModel *model;
   GtkTreeIter   iter, orig;
@@ -1693,6 +1875,7 @@ xfce_appfinder_window_execute (XfceAppfinderWindow *window,
   GdkScreen    *screen;
   const gchar  *text;
   gchar        *cmd = NULL;
+  gchar        *profile = NULL;
   gboolean      regular_command = FALSE;
   gboolean      save_cmd;
   gboolean      only_custom_cmd = FALSE;
@@ -1709,14 +1892,25 @@ xfce_appfinder_window_execute (XfceAppfinderWindow *window,
       if (xfce_appfinder_window_view_get_selected (window, &model, &iter))
         {
           gtk_tree_model_filter_convert_iter_to_child_iter (GTK_TREE_MODEL_FILTER (model), &orig, &iter);
-          result = xfce_appfinder_model_execute (window->model, &orig, screen, &regular_command, &error);
+          gtk_tree_model_get (model, &iter, XFCE_APPFINDER_MODEL_COLUMN_COMMAND, &cmd, -1);
+      
+          if (sandboxed)
+            {
+              if (!xfce_appfinder_window_sandbox_options (window, cmd, &profile))
+                {
+                  g_free (cmd);
+                  goto cleanup_window;
+                }
+            }
+          
+          result = xfce_appfinder_model_execute (window->model, &orig, screen, sandboxed, profile, &regular_command, &error);
 
           if (!result && regular_command)
             {
-              gtk_tree_model_get (model, &iter, XFCE_APPFINDER_MODEL_COLUMN_COMMAND, &cmd, -1);
-              result = xfce_appfinder_window_execute_command (cmd, screen, window, FALSE, NULL, &error);
-              g_free (cmd);
+              result = xfce_appfinder_window_execute_command (cmd, sandboxed, profile, screen, window, FALSE, NULL, &error);
             }
+
+          g_free (cmd);
         }
     }
   else
@@ -1728,8 +1922,14 @@ xfce_appfinder_window_execute (XfceAppfinderWindow *window,
 
       text = gtk_entry_get_text (GTK_ENTRY (window->entry));
       save_cmd = TRUE;
+      
+      if (sandboxed)
+        {
+          if (!xfce_appfinder_window_sandbox_options (window, text, &profile))
+            goto cleanup_window;
+        }
 
-      if (xfce_appfinder_window_execute_command (text, screen, window, only_custom_cmd, &save_cmd, &error))
+      if (xfce_appfinder_window_execute_command (text, sandboxed, profile, screen, window, only_custom_cmd, &save_cmd, &error))
         {
           if (save_cmd)
             result = xfce_appfinder_model_save_command (window->model, text, &error);
@@ -1751,6 +1951,8 @@ xfce_appfinder_window_execute (XfceAppfinderWindow *window,
       g_printerr ("%s: failed to execute: %s\n", G_LOG_DOMAIN, error->message);
       g_error_free (error);
     }
+
+  cleanup_window:
 
   if (result && close_on_succeed)
     gtk_widget_destroy (GTK_WIDGET (window));
