@@ -160,7 +160,8 @@ struct _XfceAppfinderWindow
   GtkWidget                  *button_launch_sandboxed_back;
   GtkWidget                  *button_preferences;
   GtkWidget                  *button_close;
-  GtkWidget                  *profile_box;
+  GtkWidget                  *profile_box;;
+  GtkWidget                  *profile_label;
   GtkWidget                  *bin_collapsed;
   GtkWidget                  *bin_expanded;
 
@@ -423,8 +424,11 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   gtk_box_pack_end (GTK_BOX (bbox), window->profile_box, FALSE, FALSE, 0);
   populate_profile_box (window->profile_box);
 
+  window->profile_label = gtk_label_new (_("select profile:"));
+  gtk_box_pack_end (GTK_BOX (bbox), window->profile_label, FALSE, FALSE, 0);
+
   /* launch sandboxed back button */
-  window->button_launch_sandboxed_back = button = gtk_button_new_with_mnemonic (_("Go _Back"));
+  window->button_launch_sandboxed_back = button = gtk_button_new_with_mnemonic (_("_Back"));
   gtk_box_pack_end (GTK_BOX (bbox), button, FALSE, FALSE, 0);
   g_signal_connect_swapped (G_OBJECT (button), "clicked",
       G_CALLBACK (xfce_appfinder_window_launch_sandboxed_back_clicked), window);
@@ -1816,6 +1820,7 @@ static void
 xfce_appfinder_window_launch_sandboxed_back_clicked (XfceAppfinderWindow *window)
 {
   gtk_widget_hide (window->profile_box);
+  gtk_widget_hide (window->profile_label);
   gtk_widget_hide (window->button_launch_sandboxed_back);
   gtk_widget_hide (window->button_launch_sandboxed_real);
   gtk_widget_hide (window->button_preferences);
@@ -1832,6 +1837,7 @@ static void
 xfce_appfinder_window_launch_sandboxed_clicked (XfceAppfinderWindow *window)
 {
   gtk_widget_show (window->profile_box);
+  gtk_widget_show (window->profile_label);
   gtk_widget_show (window->button_launch_sandboxed_back);
   gtk_widget_show (window->button_launch_sandboxed_real);
   gtk_widget_show (window->button_preferences);
