@@ -2110,9 +2110,9 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
   if (sandboxed)
     {
       if (profile)
-        g_string_append_printf (string, "firejail --helper --debug --profile=/etc/firejail/%s.profile ", profile);
+        g_string_append_printf (string, "firejail --profile=/etc/firejail/%s.profile ", profile);
       else
-        g_string_append (string, "firejail --helper --debug ");
+        g_string_append (string, "firejail ");
     }
 
   if (garcon_menu_item_requires_terminal (item))
