@@ -1788,9 +1788,9 @@ xfce_appfinder_window_execute_command (const gchar          *text,
       if (sandboxed)
         {
           if (profile)
-            sandbox_expanded = g_strdup_printf ("firejail --helper --debug --profile=/etc/firejail/%s.profile %s", profile, expanded);
+            sandbox_expanded = g_strdup_printf ("firejail --profile=/etc/firejail/%s.profile %s", profile, expanded);
           else
-            sandbox_expanded = g_strdup_printf ("firejail --helper --debug %s", expanded);
+            sandbox_expanded = g_strdup_printf ("firejail %s", expanded);
           succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);
           g_free (sandbox_expanded);
         }

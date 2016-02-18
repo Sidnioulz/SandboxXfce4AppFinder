@@ -2139,7 +2139,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
     }
 
   if (g_shell_parse_argv (string->str, NULL, &argv, error))
-    {//TODO sandboxed
+    {
     
       succeed = xfce_spawn_on_screen (screen, garcon_menu_item_get_path (item),
                                       argv, NULL, G_SPAWN_SEARCH_PATH,
