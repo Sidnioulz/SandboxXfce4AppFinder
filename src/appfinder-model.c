@@ -2066,6 +2066,31 @@ xfce_appfinder_model_get_visible_command (XfceAppfinderModel *model,
 
 
 
+static gchar*
+get_profile_for_name (const gchar *profile)
+{
+  gchar *profiletxt;
+  struct stat s;
+
+  g_return_val_if_fail (profile != NULL, NULL);
+
+  profiletxt = g_strdup_printf ("--profile=%s/firejail/%s.profile", g_get_user_config_dir (), profile);
+
+  if (stat (profiletxt, &s) == 0)
+    return profiletxt;
+
+  g_free (profiletxt);
+  profiletxt = g_strdup_printf ("--profile=/etc/firejail/%s.profile", profile);
+
+  if (stat (profiletxt, &s) == 0)
+    return profiletxt;
+
+  g_free (profiletxt);
+  return NULL;
+}
+
+
+
 gboolean
 xfce_appfinder_model_execute (XfceAppfinderModel  *model,
                               const GtkTreeIter   *iter,
@@ -2110,7 +2135,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
   if (sandboxed)
     {
       if (profile)
-        g_string_append_printf (string, "firejail --profile=/etc/firejail/%s.profile ", profile);
+        g_string_append_printf (string, "firejail %s ", get_profile_for_name (profile));
       else
         g_string_append (string, "firejail ");
     }

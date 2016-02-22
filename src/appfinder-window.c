@@ -27,6 +27,10 @@
 #include <errno.h>
 #endif
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <libxfce4util/libxfce4util.h>
 #include <libxfce4ui/libxfce4ui.h>
 #include <gdk/gdkkeysyms.h>
@@ -1745,6 +1749,31 @@ populate_profile_box (GtkWidget *widget)
 
 
 
+static gchar*
+get_profile_for_name (const gchar *profile)
+{
+  gchar *profiletxt;
+  struct stat s;
+
+  g_return_val_if_fail (profile != NULL, NULL);
+
+  profiletxt = g_strdup_printf ("--profile=%s/firejail/%s.profile", g_get_user_config_dir (), profile);
+
+  if (stat (profiletxt, &s) == 0)
+    return profiletxt;
+
+  g_free (profiletxt);
+  profiletxt = g_strdup_printf ("--profile=/etc/firejail/%s.profile", profile);
+
+  if (stat (profiletxt, &s) == 0)
+    return profiletxt;
+
+  g_free (profiletxt);
+  return NULL;
+}
+
+
+
 static gboolean
 xfce_appfinder_window_execute_command (const gchar          *text,
                                        gboolean              sandboxed,
@@ -1788,7 +1817,7 @@ xfce_appfinder_window_execute_command (const gchar          *text,
       if (sandboxed)
         {
           if (profile)
-            sandbox_expanded = g_strdup_printf ("firejail --profile=/etc/firejail/%s.profile %s", profile, expanded);
+            sandbox_expanded = g_strdup_printf ("firejail %s %s", get_profile_for_name (profile), expanded);
           else
             sandbox_expanded = g_strdup_printf ("firejail %s", expanded);
           succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);
