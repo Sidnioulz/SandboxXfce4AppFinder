@@ -98,6 +98,15 @@ gboolean             xfce_appfinder_model_save_command           (XfceAppfinderM
 GdkPixbuf           *xfce_appfinder_model_get_icon_for_command   (XfceAppfinderModel        *model,
                                                                   const gchar               *command);
 
+GarconMenuItem      *xfce_appfinder_model_get_item_for_command   (XfceAppfinderModel        *model,
+                                                                  const gchar               *command);
+
+gboolean             xfce_appfinder_model_is_command_sandboxed   (XfceAppfinderModel        *model,
+                                                                  const gchar               *command);
+
+gchar               *xfce_appfinder_model_prep_sandboxed_app_arg (GarconMenuItem         *item,
+                                                                  gchar                     *expanded);
+
 void                 xfce_appfinder_model_icon_theme_changed     (XfceAppfinderModel        *model);
 
 void                 xfce_appfinder_model_history_clear          (XfceAppfinderModel        *model);

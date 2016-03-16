@@ -32,7 +32,6 @@
 #include <src/appfinder-private.h>
 
 
-
 #define HISTORY_PATH   "xfce4/xfce4-appfinder/history"
 #define BOOKMARKS_PATH "xfce4/appfinder/bookmarks"
 
@@ -2066,31 +2065,6 @@ xfce_appfinder_model_get_visible_command (XfceAppfinderModel *model,
 
 
 
-static gchar*
-get_profile_for_name (const gchar *profile)
-{
-  gchar *profiletxt;
-  struct stat s;
-
-  g_return_val_if_fail (profile != NULL, NULL);
-
-  profiletxt = g_strdup_printf ("--profile=%s/firejail/%s.profile", g_get_user_config_dir (), profile);
-
-  if (stat (profiletxt, &s) == 0)
-    return profiletxt;
-
-  g_free (profiletxt);
-  profiletxt = g_strdup_printf ("--profile=/etc/firejail/%s.profile", profile);
-
-  if (stat (profiletxt, &s) == 0)
-    return profiletxt;
-
-  g_free (profiletxt);
-  return NULL;
-}
-
-
-
 gboolean
 xfce_appfinder_model_execute (XfceAppfinderModel  *model,
                               const GtkTreeIter   *iter,
@@ -2106,6 +2080,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
   GString         *string;
   gboolean         succeed = FALSE;
   gchar          **argv;
+  gboolean         secure_ws = xfce_workspace_is_active_secure (screen);
 
   appfinder_return_val_if_fail (XFCE_IS_APPFINDER_MODEL (model), FALSE);
   appfinder_return_val_if_fail (iter->stamp == model->stamp, FALSE);
@@ -2132,10 +2107,20 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
 
     
   APPFINDER_DEBUG ("spawn \"%s\"%s", command, sandboxed? " sandboxed":"");
-  if (sandboxed)
+  if (garcon_menu_item_get_sandboxed (item) && !secure_ws)
+    {
+      gchar *sandbox_expanded = xfce_appfinder_model_prep_sandboxed_app_arg (item, NULL);
+      g_string_append (string, sandbox_expanded);
+      g_free (sandbox_expanded);
+    }
+  else if (sandboxed && !secure_ws)
     {
       if (profile)
-        g_string_append_printf (string, "firejail %s ", get_profile_for_name (profile));
+        {
+          gchar *profiletxt = xfce_get_firejail_profile_for_name (profile);
+          g_string_append_printf (string, "firejail %s ", profiletxt? profiletxt : "");
+          g_free (profiletxt);
+        }
       else
         g_string_append (string, "firejail ");
     }
@@ -2165,7 +2150,6 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
 
   if (g_shell_parse_argv (string->str, NULL, &argv, error))
     {
-    
       succeed = xfce_spawn_on_screen (screen, garcon_menu_item_get_path (item),
                                       argv, NULL, G_SPAWN_SEARCH_PATH,
                                       garcon_menu_item_supports_startup_notification (item),
@@ -2358,6 +2342,109 @@ xfce_appfinder_model_get_icon_for_command (XfceAppfinderModel *model,
     }
 
   return NULL;
+}
+
+
+
+GarconMenuItem *
+xfce_appfinder_model_get_item_for_command (XfceAppfinderModel *model,
+                                           const gchar        *command)
+{
+  ModelItem   *item;
+
+  appfinder_return_val_if_fail (XFCE_IS_APPFINDER_MODEL (model), NULL);
+
+  if (IS_STRING (command))
+    {
+      item = g_hash_table_lookup (model->items_hash, command);
+      if (G_LIKELY (item != NULL))
+        return g_object_ref (G_OBJECT (item->item));
+    }
+
+  return NULL;
+}
+
+
+
+gboolean
+xfce_appfinder_model_is_command_sandboxed (XfceAppfinderModel *model,
+                                           const gchar        *command)
+{
+  ModelItem   *item;
+
+  appfinder_return_val_if_fail (XFCE_IS_APPFINDER_MODEL (model), FALSE);
+
+  if (IS_STRING (command))
+    {
+      item = g_hash_table_lookup (model->items_hash, command);
+      if (G_LIKELY (item != NULL))
+        {
+          return garcon_menu_item_get_sandboxed (item->item);
+        }
+    }
+
+  return FALSE;
+}
+
+
+
+gchar *
+xfce_appfinder_model_prep_sandboxed_app_arg (GarconMenuItem *item, gchar *expanded)
+{
+  gchar          *sandbox_expanded   = NULL;
+
+  const gchar *default_profile = garcon_menu_item_get_sandbox_profile (item);
+  gboolean     network = garcon_menu_item_get_sandbox_enable_network (item);
+  gint         mode = garcon_menu_item_get_sandbox_fs_mode (item);
+  gboolean     disposable = garcon_menu_item_get_sandbox_fs_disposable (item);
+  gchar      **folders = garcon_menu_item_get_sandbox_fs_sync_folders (item);
+
+  gchar       *profile_str = NULL;
+  gchar       *fs_str      = NULL;
+  gchar       *fs_sync_str = NULL;
+
+  if (default_profile)
+    profile_str = xfce_get_firejail_profile_for_name (default_profile);
+
+  if (mode == FS_PRIV_FULL)
+    {
+      fs_str = NULL;
+    }
+  else if (mode == FS_PRIV_READ_ONLY)
+    {
+      if (disposable)
+        fs_str = "--overlay-home --overlay-disposable";
+      else
+        fs_str = "--overlay-home";
+    }
+  else if (mode == FS_PRIV_PRIVATE)
+    {
+      if (disposable)
+        fs_str = "--overlay-private-home --overlay-disposable";
+      else
+        fs_str = "--overlay-private-home";
+    }
+
+  for (gsize i = 0; folders && folders[i]; i++)
+    {
+      gchar *previous = fs_sync_str;
+      fs_sync_str = g_strdup_printf ("%s \"--overlay-sync=%s\"", previous? previous:"", folders[i]);
+      g_free (previous);
+    }
+
+  sandbox_expanded = g_strdup_printf ("firejail \"--name=%s\" %s --net=%s %s %s %s",
+                                      garcon_menu_item_get_name (item),
+                                      profile_str? profile_str:"",
+                                      network? "auto":"none",
+                                      fs_str? fs_str:"",
+                                      fs_sync_str? fs_sync_str:"",
+                                      expanded? expanded:"");
+
+  g_free (fs_sync_str);
+  g_free (profile_str);
+  g_strfreev (folders);
+
+  return sandbox_expanded;
 }
 
 

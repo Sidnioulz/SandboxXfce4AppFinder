@@ -37,6 +37,9 @@
 #include <xfconf/xfconf.h>
 #include <glib/gstdio.h>
 
+#define WNCK_I_KNOW_THIS_IS_UNSTABLE
+#include <libwnck/libwnck.h>
+
 #include <src/appfinder-window.h>
 #include <src/appfinder-model.h>
 #include <src/appfinder-category-model.h>
@@ -52,8 +55,6 @@
 #else
 #define APPFINDER_WIDGET_XID(widget) (0)
 #endif
-
-
 
 #define DEFAULT_WINDOW_WIDTH   400
 #define DEFAULT_WINDOW_HEIGHT  400
@@ -111,6 +112,9 @@ static void       xfce_appfinder_window_property_changed              (XfconfCha
 static gboolean   xfce_appfinder_window_item_visible                  (GtkTreeModel                *model,
                                                                        GtkTreeIter                 *iter,
                                                                        gpointer                     data);
+static gboolean   xfce_appfinder_window_view_get_selected             (XfceAppfinderWindow         *window,
+                                                                       GtkTreeModel               **model,
+                                                                       GtkTreeIter                 *iter);
 static void       xfce_appfinder_window_item_changed                  (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_row_activated                 (XfceAppfinderWindow         *window);
 static void       xfce_appfinder_window_icon_theme_changed            (XfceAppfinderWindow         *window);
@@ -151,6 +155,8 @@ struct _XfceAppfinderWindow
   GtkWidget                  *paned;
   GtkWidget                  *entry;
   GtkWidget                  *image;
+  GtkWidget                  *secure_ws_info;
+  GtkWidget                  *message_label;
   GtkWidget                  *view;
   GtkWidget                  *viewscroll;
   GtkWidget                  *sidepane;
@@ -178,6 +184,9 @@ struct _XfceAppfinderWindow
 
   gulong                      property_watch_id;
   gulong                      categories_changed_id;
+
+  WnckScreen                 *wnck_screen;
+  gulong                      active_workspace_changed_id;
 };
 
 static const GtkTargetEntry target_list[] =
@@ -208,6 +217,138 @@ xfce_appfinder_window_class_init (XfceAppfinderWindowClass *klass)
 
 
 
+void
+xfce_appfinder_update_button_labels (XfceAppfinderWindow *window)
+{
+  WnckWorkspace       *active_ws;
+  gint                 active_n;
+  GtkWidget           *image;
+
+  appfinder_return_if_fail (XFCE_IS_APPFINDER_WINDOW (window));
+
+  /* get the active workspace if it exists */
+  active_ws = wnck_screen_get_active_workspace (window->wnck_screen);
+  active_n = active_ws? wnck_workspace_get_number (active_ws) : -1;
+
+  /* not a secure workspace */
+  if (active_n < 0 || !xfce_workspace_is_secure (active_n))
+    {
+      GarconMenuItem *item;
+      GtkTreeModel   *model;
+      GtkTreeIter     iter;
+      gchar          *cmd = NULL;
+
+      /* get command */
+      if (gtk_widget_get_visible (window->paned))
+        {
+          if (xfce_appfinder_window_view_get_selected (window, &model, &iter))
+            gtk_tree_model_get (model, &iter, XFCE_APPFINDER_MODEL_COLUMN_COMMAND, &cmd, -1);
+        }
+      else
+          cmd = g_strdup (gtk_entry_get_text (GTK_ENTRY (window->entry)));
+
+      /* get corresponding Garcon item and check if sandboxed */
+      item = xfce_appfinder_model_get_item_for_command (window->model, cmd);
+      if (item && garcon_menu_item_get_sandboxed (item))
+        {
+          /* make explicit reference to fact that app is sandboxed */
+          gtk_button_set_label (GTK_BUTTON (window->button_launch), _("La_unch Sandboxed App"));
+          image = gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON);
+          gtk_button_set_image (GTK_BUTTON (window->button_launch), image);
+
+          /* hide the "Launch in Secure WS" button */
+          gtk_widget_set_visible (window->button_launch_sandboxed, FALSE);
+        }
+      else
+        {
+          /* normal launch button */
+          gtk_button_set_label (GTK_BUTTON (window->button_launch), _("La_unch"));
+          image = gtk_image_new_from_stock (GTK_STOCK_EXECUTE, GTK_ICON_SIZE_BUTTON);
+          gtk_button_set_image (GTK_BUTTON (window->button_launch), image);
+
+          /* add an explicit "Launch in Sandbox" button */
+          gtk_widget_set_visible (window->button_launch_sandboxed, TRUE);
+        }
+
+      if (item)
+        g_object_unref (item);
+
+      /* no longer in a secure WS, hide the secure WS notification */
+      gtk_widget_set_visible (window->secure_ws_info, FALSE);
+    }
+  /* secure workspace, make sure it's clear sandboxing will occur */
+  else
+    {
+      /* basic button makes explicit reference to secure workspace */
+      gchar *label = g_strdup_printf (_("La_unch in Secure Workspace %d"), active_n + 1);
+      gchar *ws_name = xfce_workspace_get_workspace_name (active_n);
+      gtk_button_set_label (GTK_BUTTON (window->button_launch), label);
+      g_free (label);
+      image = gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON);
+      gtk_button_set_image (GTK_BUTTON (window->button_launch), image);
+
+      /* conflicts with the "Launch in Secure WS" button */
+      gtk_widget_set_visible (window->button_launch_sandboxed, FALSE);
+
+      /* high-visibility status notification */
+      gtk_widget_set_visible (window->secure_ws_info, TRUE);
+      label = g_strdup_printf (_("<b>Workspace %d is a Secure Workspace. Your app will run inside the '%s' sandbox.</b>"), active_n + 1, ws_name);
+      gtk_label_set_markup (GTK_LABEL (window->message_label), label);
+      g_free (label);
+      g_free (ws_name);
+    }
+}
+
+
+
+static void
+xfce_appfinder_window_on_active_workspace_changed (WnckScreen    *screen,
+                                                   WnckWorkspace *previously_active_space,
+                                                   gpointer       user_data)
+{
+  XfceAppfinderWindow *window = XFCE_APPFINDER_WINDOW (user_data);
+  appfinder_return_if_fail (XFCE_IS_APPFINDER_WINDOW (window));
+
+  xfce_appfinder_update_button_labels (window);
+}
+
+
+
+static void
+xfce_appfinder_window_on_screen_changed (GtkWidget *widget,
+                                         GdkScreen *previous_screen)
+{
+  XfceAppfinderWindow *window = XFCE_APPFINDER_WINDOW (widget);
+  GdkScreen           *screen;
+  WnckScreen          *wnck_screen;
+
+  appfinder_return_if_fail (XFCE_IS_APPFINDER_WINDOW (window));
+
+  screen = gtk_widget_get_screen (widget);
+  wnck_screen = wnck_screen_get (gdk_screen_get_number (screen));
+
+  if (window->wnck_screen != wnck_screen)
+    {
+      if (window->active_workspace_changed_id)
+        {
+          g_signal_handler_disconnect (window->wnck_screen, window->active_workspace_changed_id);
+          window->active_workspace_changed_id = 0;
+        }
+
+      window->wnck_screen = wnck_screen;
+
+      window->active_workspace_changed_id = g_signal_connect (G_OBJECT (window->wnck_screen),
+                                                              "active-workspace-changed",
+                                                              G_CALLBACK (xfce_appfinder_window_on_active_workspace_changed),
+                                                              window);
+      xfce_appfinder_window_on_active_workspace_changed (window->wnck_screen,
+                                                         wnck_screen_get_active_workspace (window->wnck_screen),
+                                                         window);
+    }
+}
+
+
+
 static void
 xfce_appfinder_window_init (XfceAppfinderWindow *window)
 {
@@ -219,6 +360,9 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   GtkWidget          *image;
   GtkWidget          *hbox;
   GtkWidget          *align;
+  GtkWidget          *infobar;
+  GtkWidget          *label;
+  GtkWidget          *content_area;
   GtkTreeViewColumn  *column;
   GtkCellRenderer    *renderer;
   GtkTreeSelection   *selection;
@@ -257,6 +401,37 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   gtk_container_add (GTK_CONTAINER (window), vbox);
   gtk_container_set_border_width (GTK_CONTAINER (vbox), 6);
   gtk_widget_show (vbox);
+
+  align = gtk_alignment_new (0.5, 0.0, 1.0, 1.0);
+  gtk_box_pack_start (GTK_BOX (vbox), align, FALSE, FALSE, 0);
+  gtk_widget_show (align);
+
+  window->secure_ws_info = infobar = gtk_info_bar_new ();
+  gtk_info_bar_set_message_type (GTK_INFO_BAR (infobar), GTK_MESSAGE_INFO);
+#if GTK_CHECK_VERSION (3, 0, 0)
+  gtk_info_bar_set_show_close_button (GTK_INFO_BAR (infobar), TRUE);
+#endif
+  gtk_container_add (GTK_CONTAINER (align), window->secure_ws_info);
+  gtk_widget_show (infobar);
+
+#if GTK_CHECK_VERSION (3, 0, 0)
+  hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+#else
+  hbox = gtk_hbox_new (FALSE, 6);
+#endif
+  content_area = gtk_info_bar_get_content_area (GTK_INFO_BAR (infobar));
+  gtk_container_add (GTK_CONTAINER (content_area), hbox);
+  gtk_widget_show (hbox);
+
+  image = gtk_image_new_from_icon_name ("firejail-workspaces", GTK_ICON_SIZE_LARGE_TOOLBAR);
+  gtk_widget_set_size_request (image, 24, 24);
+  gtk_box_pack_start (GTK_BOX (hbox), image, FALSE, FALSE, 0);
+  gtk_widget_show (image);
+
+  window->message_label = label = gtk_label_new (NULL);
+  gtk_label_set_markup (GTK_LABEL (label), _("<b>This is a Secure Workspace</b>"));
+  gtk_box_pack_start (GTK_BOX (hbox), label, TRUE, TRUE, 0);
+  gtk_widget_show (label);
 
 #if GTK_CHECK_VERSION (3, 0, 0)
   hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
@@ -462,6 +637,11 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   /* hide the Launch Sandboxed options for now */
   xfce_appfinder_window_launch_sandboxed_back_clicked (window);
 
+  /* update button labels based on whether in a secure workspace */
+  window->wnck_screen = NULL;
+  g_signal_connect (G_OBJECT (window), "screen-changed", G_CALLBACK (xfce_appfinder_window_on_screen_changed), NULL);
+  xfce_appfinder_window_on_screen_changed (GTK_WIDGET (window), NULL);
+
   /* load icon theme */
   window->icon_theme = gtk_icon_theme_get_for_screen (gtk_window_get_screen (GTK_WINDOW (window)));
   g_signal_connect_swapped (G_OBJECT (window->icon_theme), "changed",
@@ -512,6 +692,12 @@ xfce_appfinder_window_finalize (GObject *object)
   if (window->filter_category != NULL)
     g_object_unref (G_OBJECT (window->filter_category));
   g_free (window->filter_text);
+
+  if (window->active_workspace_changed_id)
+    {
+      g_signal_handler_disconnect (window->wnck_screen, window->active_workspace_changed_id);
+      window->active_workspace_changed_id = 0;
+    }
 
   (*G_OBJECT_CLASS (xfce_appfinder_window_parent_class)->finalize) (object);
 }
@@ -1250,6 +1436,8 @@ xfce_appfinder_window_entry_changed_idle (gpointer data)
         g_object_unref (G_OBJECT (pixbuf));
     }
 
+  xfce_appfinder_update_button_labels (window);
+
   GDK_THREADS_LEAVE ();
 
   return FALSE;
@@ -1654,6 +1842,8 @@ xfce_appfinder_window_item_changed (XfceAppfinderWindow *window)
           xfce_appfinder_window_update_image (window, NULL);
         }
     }
+
+    xfce_appfinder_update_button_labels (window);
 }
 
 
@@ -1694,44 +1884,10 @@ static void
 populate_profile_box (GtkWidget *widget)
 {
   GtkComboBoxText  *box   = (GtkComboBoxText *) widget;
-  GError           *error = NULL;
   GList            *profiles = NULL, *lp;
-  GDir             *dir;
-  const gchar      *name;
-  gchar            *copy;
 
-  //TODO READ home TOO
-	// look for a profile in ~/.config/firejail directory
-  // if (asprintf(&usercfgdir, "%s/.config/firejail", cfg.homedir) == -1)
 
-  /* read the profile directory */
-  dir = g_dir_open ("/etc/firejail", 0, &error);
-  if (error)
-    {
-      TRACE ("Error: could not open \"/etc/firejail\" (%s)", error->message);
-      g_error_free (error);
-    }
-
-  errno = 0;
-  while ((name = g_dir_read_name (dir)) != NULL)
-    {
-      if (g_str_has_suffix (name, ".profile") &&
-          g_strcmp0 (EXECHELP_DEFAULT_USER_PROFILE ".profile", name) &&
-          g_strcmp0 (EXECHELP_DEFAULT_ROOT_PROFILE ".profile", name))
-        {
-          copy = g_strndup (name, strstr (name, ".profile") - name);
-          profiles = g_list_prepend (profiles, copy);
-        }
-    }
-  if (errno)
-    {
-      TRACE ("Error: could not read \"/etc/firejail\" entry (%s)", strerror (errno));
-    }
-
-  g_dir_close (dir);
-
-  /* we did not know the reading order in the directory */
-  profiles = g_list_sort (profiles, (GCompareFunc) g_strcmp0);
+  profiles = xfce_get_firejail_profile_names (FALSE);
   for (lp = profiles; lp != NULL; lp = lp->next)
     {
       gtk_combo_box_text_append_text (box, lp->data);
@@ -1745,31 +1901,6 @@ populate_profile_box (GtkWidget *widget)
   gtk_combo_box_set_active (GTK_COMBO_BOX (box), 0);
 
   return;
-}
-
-
-
-static gchar*
-get_profile_for_name (const gchar *profile)
-{
-  gchar *profiletxt;
-  struct stat s;
-
-  g_return_val_if_fail (profile != NULL, NULL);
-
-  profiletxt = g_strdup_printf ("--profile=%s/firejail/%s.profile", g_get_user_config_dir (), profile);
-
-  if (stat (profiletxt, &s) == 0)
-    return profiletxt;
-
-  g_free (profiletxt);
-  profiletxt = g_strdup_printf ("--profile=/etc/firejail/%s.profile", profile);
-
-  if (stat (profiletxt, &s) == 0)
-    return profiletxt;
-
-  g_free (profiletxt);
-  return NULL;
 }
 
 
@@ -1788,12 +1919,17 @@ xfce_appfinder_window_execute_command (const gchar          *text,
   gchar    *action_cmd = NULL;
   gchar    *expanded;
   gchar    *sandbox_expanded;
+  gboolean  sandboxed_app;
+  gboolean  secure_ws = xfce_workspace_is_active_secure (screen);
 
   appfinder_return_val_if_fail (error != NULL && *error == NULL, FALSE);
   appfinder_return_val_if_fail (GDK_IS_SCREEN (screen), FALSE);
 
   if (!IS_STRING (text))
     return TRUE;
+
+  if (!only_custom_cmd)
+    sandboxed_app = xfce_appfinder_model_is_command_sandboxed (window->model, text) && !secure_ws;
 
   if (window->actions == NULL)
     window->actions = xfce_appfinder_actions_get ();
@@ -1814,10 +1950,28 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 
       /* spawn the command */
       APPFINDER_DEBUG ("spawn \"%s\"%s", expanded, sandboxed? " sandboxed":"");
-      if (sandboxed)
+      if (sandboxed_app)
+        {
+          GarconMenuItem *item = xfce_appfinder_model_get_item_for_command (window->model, text);
+
+          if (item)
+            {
+              sandbox_expanded = xfce_appfinder_model_prep_sandboxed_app_arg (item, expanded);
+
+              succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);
+
+              g_free (sandbox_expanded);
+              g_object_unref (item);
+            }
+        }
+      else if (sandboxed && !secure_ws)
         {
           if (profile)
-            sandbox_expanded = g_strdup_printf ("firejail %s %s", get_profile_for_name (profile), expanded);
+            {
+              gchar *profiletxt = xfce_get_firejail_profile_for_name (profile);
+              sandbox_expanded = g_strdup_printf ("firejail %s %s", profiletxt? profiletxt : "", expanded);
+              g_free (profiletxt);
+            }
           else
             sandbox_expanded = g_strdup_printf ("firejail %s", expanded);
           succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);

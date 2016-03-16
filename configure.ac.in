@@ -78,6 +78,7 @@ XDT_CHECK_PACKAGE([LIBXFCE4UTIL], [libxfce4util-1.0], [4.10.0])
 XDT_CHECK_PACKAGE([GARCON], [garcon-1], [0.3.0])
 XDT_CHECK_PACKAGE([XFCONF], [libxfconf-0], [4.10.0])
 XDT_CHECK_PACKAGE([EXECHELPER], [libexechelperutils], [0.9.29])
+XDT_CHECK_PACKAGE([LIBWNCK], [libwnck-1.0], [2.30])
 
 dnl ************************************
 dnl *** Compile against GTK3 or GTK2 ***
