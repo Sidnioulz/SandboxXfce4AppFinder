@@ -2079,6 +2079,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
   ModelItem       *mitem;
   GString         *string;
   gboolean         succeed = FALSE;
+  gchar           *garcon_expanded;
   gchar          **argv;
   gboolean         secure_ws = xfce_workspace_is_active_secure (screen);
 
@@ -2107,13 +2108,10 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
 
     
   APPFINDER_DEBUG ("spawn \"%s\"%s", command, sandboxed? " sandboxed":"");
-  if (garcon_menu_item_get_sandboxed (item) && !secure_ws)
-    {
-      gchar *sandbox_expanded = xfce_appfinder_model_prep_sandboxed_app_arg (item, NULL);
-      g_string_append (string, sandbox_expanded);
-      g_free (sandbox_expanded);
-    }
-  else if (sandboxed && !secure_ws)
+
+  /* If a sandboxed run (via the appfinder's "Launch in Sandbox" button) of a
+   * non-sandboxed app on a non-sandboxed ws, inject firejail here */
+  if (!garcon_menu_item_get_sandboxed (item) && sandboxed && !secure_ws)
     {
       if (profile)
         {
@@ -2124,9 +2122,12 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
       else
         g_string_append (string, "firejail ");
     }
+  else
 
-  if (garcon_menu_item_requires_terminal (item))
-    g_string_append (string, "exo-open --launch TerminalEmulator ");
+  /* This will apply all the relevant options for sandboxed apps and for terminal running */
+  garcon_expanded = garcon_menu_item_expand_command (item, NULL);
+  g_string_append (string, garcon_expanded);
+  g_free (garcon_expanded);
 
   /* expand the field codes */
   for (p = command; *p != '\0'; ++p)
@@ -2384,67 +2385,6 @@ xfce_appfinder_model_is_command_sandboxed (XfceAppfinderModel *model,
     }
 
   return FALSE;
-}
-
-
-
-gchar *
-xfce_appfinder_model_prep_sandboxed_app_arg (GarconMenuItem *item, gchar *expanded)
-{
-  gchar          *sandbox_expanded   = NULL;
-
-  const gchar *default_profile = garcon_menu_item_get_sandbox_profile (item);
-  gboolean     network = garcon_menu_item_get_sandbox_enable_network (item);
-  gint         mode = garcon_menu_item_get_sandbox_fs_mode (item);
-  gboolean     disposable = garcon_menu_item_get_sandbox_fs_disposable (item);
-  gchar      **folders = garcon_menu_item_get_sandbox_fs_sync_folders (item);
-
-  gchar       *profile_str = NULL;
-  gchar       *fs_str      = NULL;
-  gchar       *fs_sync_str = NULL;
-
-  if (default_profile)
-    profile_str = xfce_get_firejail_profile_for_name (default_profile);
-
-  if (mode == FS_PRIV_FULL)
-    {
-      fs_str = NULL;
-    }
-  else if (mode == FS_PRIV_READ_ONLY)
-    {
-      if (disposable)
-        fs_str = "--overlay-home --overlay-disposable";
-      else
-        fs_str = "--overlay-home";
-    }
-  else if (mode == FS_PRIV_PRIVATE)
-    {
-      if (disposable)
-        fs_str = "--overlay-private-home --overlay-disposable";
-      else
-        fs_str = "--overlay-private-home";
-    }
-
-  for (gsize i = 0; folders && folders[i]; i++)
-    {
-      gchar *previous = fs_sync_str;
-      fs_sync_str = g_strdup_printf ("%s \"--overlay-sync=%s\"", previous? previous:"", folders[i]);
-      g_free (previous);
-    }
-
-  sandbox_expanded = g_strdup_printf ("firejail \"--name=%s\" %s --net=%s %s %s %s",
-                                      garcon_menu_item_get_name (item),
-                                      profile_str? profile_str:"",
-                                      network? "auto":"none",
-                                      fs_str? fs_str:"",
-                                      fs_sync_str? fs_sync_str:"",
-                                      expanded? expanded:"");
-
-  g_free (fs_sync_str);
-  g_free (profile_str);
-  g_strfreev (folders);
-
-  return sandbox_expanded;
 }
 
 

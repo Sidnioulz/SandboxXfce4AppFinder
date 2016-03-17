@@ -1956,9 +1956,9 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 
           if (item)
             {
-              sandbox_expanded = xfce_appfinder_model_prep_sandboxed_app_arg (item, expanded);
+              sandbox_expanded = garcon_menu_item_expand_command (item, expanded);
 
-              succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, FALSE, FALSE, error);
+              succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, garcon_menu_item_requires_terminal (item), FALSE, error);
 
               g_free (sandbox_expanded);
               g_object_unref (item);
