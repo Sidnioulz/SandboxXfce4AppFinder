@@ -1956,7 +1956,7 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 
           if (item)
             {
-              sandbox_expanded = garcon_menu_item_expand_command (item, expanded);
+              sandbox_expanded = garcon_menu_item_expand_command (item, expanded, secure_ws);
 
               succeed = xfce_spawn_command_line_on_screen (screen,
                                                            sandbox_expanded,

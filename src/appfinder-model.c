@@ -2125,7 +2125,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
   else
 
   /* This will apply all the relevant options for sandboxed apps and for terminal running */
-  garcon_expanded = garcon_menu_item_expand_command (item, NULL);
+  garcon_expanded = garcon_menu_item_expand_command (item, NULL, secure_ws);
   g_string_append (string, garcon_expanded);
   g_free (garcon_expanded);
 
