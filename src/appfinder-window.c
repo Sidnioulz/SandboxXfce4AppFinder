@@ -1960,7 +1960,7 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 
               succeed = xfce_spawn_command_line_on_screen (screen,
                                                            sandbox_expanded,
-                                                           garcon_menu_item_requires_terminal (item),
+                                                           FALSE,
                                                            garcon_menu_item_supports_startup_notification (item),
                                                            error);
 
