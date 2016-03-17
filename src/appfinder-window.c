@@ -1958,7 +1958,11 @@ xfce_appfinder_window_execute_command (const gchar          *text,
             {
               sandbox_expanded = garcon_menu_item_expand_command (item, expanded);
 
-              succeed = xfce_spawn_command_line_on_screen (screen, sandbox_expanded, garcon_menu_item_requires_terminal (item), FALSE, error);
+              succeed = xfce_spawn_command_line_on_screen (screen,
+                                                           sandbox_expanded,
+                                                           garcon_menu_item_requires_terminal (item),
+                                                           garcon_menu_item_supports_startup_notification (item),
+                                                           error);
 
               g_free (sandbox_expanded);
               g_object_unref (item);
