@@ -2122,7 +2122,6 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
       else
         g_string_append (string, "firejail ");
     }
-  else
 
   /* This will apply all the relevant options for sandboxed apps and for terminal running */
   garcon_expanded = garcon_menu_item_expand_command (item, NULL, secure_ws);
