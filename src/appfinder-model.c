@@ -1484,6 +1484,10 @@ xfce_appfinder_model_collect_item (const gchar    *desktop_id,
   appfinder_return_if_fail (GARCON_IS_MENU_ITEM (menu_item));
   appfinder_return_if_fail (desktop_id != NULL);
 
+  /* ignore GIO's "temporary" desktop files created by some GIO saving routine... */
+  if (g_str_has_prefix (desktop_id, "userapp-"))
+    return;
+
   /* check if we alread have the item */
   item = g_hash_table_lookup (context->desktop_ids, desktop_id);
   if (G_LIKELY (item == NULL))
@@ -2124,7 +2128,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
     }
 
   /* This will apply all the relevant options for sandboxed apps and for terminal running */
-  garcon_expanded = garcon_menu_item_expand_command (item, NULL, secure_ws);
+  garcon_expanded = garcon_menu_item_expand_command (item, NULL, sandboxed || secure_ws);
   g_string_append (string, garcon_expanded);
   g_free (garcon_expanded);
 
