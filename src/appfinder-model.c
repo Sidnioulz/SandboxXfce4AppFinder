@@ -2115,7 +2115,7 @@ xfce_appfinder_model_execute (XfceAppfinderModel  *model,
 
   /* If a sandboxed run (via the appfinder's "Launch in Sandbox" button) of a
    * non-sandboxed app on a non-sandboxed ws, inject firejail here */
-  if (!garcon_menu_item_get_sandboxed (item) && sandboxed && !secure_ws)
+  if (item && !garcon_menu_item_get_sandboxed (item) && sandboxed && !secure_ws)
     {
       if (profile)
         {
@@ -2361,7 +2361,7 @@ xfce_appfinder_model_get_item_for_command (XfceAppfinderModel *model,
   if (IS_STRING (command))
     {
       item = g_hash_table_lookup (model->items_hash, command);
-      if (G_LIKELY (item != NULL))
+      if (G_LIKELY (item != NULL && item->item != NULL))
         return g_object_ref (G_OBJECT (item->item));
     }
 
@@ -2381,7 +2381,7 @@ xfce_appfinder_model_is_command_sandboxed (XfceAppfinderModel *model,
   if (IS_STRING (command))
     {
       item = g_hash_table_lookup (model->items_hash, command);
-      if (G_LIKELY (item != NULL))
+      if (G_LIKELY (item != NULL && item->item != NULL))
         {
           return garcon_menu_item_get_sandboxed (item->item);
         }
