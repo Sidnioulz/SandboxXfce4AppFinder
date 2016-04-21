@@ -20,6 +20,7 @@
 #define __XFCE_APPFINDER_WINDOW_H__
 
 #include <gtk/gtk.h>
+#include <garcon/garcon.h>
 
 G_BEGIN_DECLS
 
@@ -33,6 +34,13 @@ typedef struct _XfceAppfinderWindow      XfceAppfinderWindow;
 #define XFCE_IS_APPFINDER_WINDOW_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), XFCE_TYPE_APPFINDER_WINDOW))
 #define XFCE_APPFINDER_WINDOW_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), XFCE_TYPE_APPFINDER_WINDOW, XfceAppfinderWindowClass))
 
+
+
+#define APPFINDER_LAUNCH_RESPONSE       301
+#define APPFINDER_CONF_SANDBOX_RESPONSE 302
+
+
+
 GType      xfce_appfinder_window_get_type      (void) G_GNUC_CONST;
 
 void       xfce_appfinder_window_set_expanded  (XfceAppfinderWindow *window,
@@ -40,7 +48,10 @@ void       xfce_appfinder_window_set_expanded  (XfceAppfinderWindow *window,
 
 void       xfce_appfinder_update_button_labels (XfceAppfinderWindow *window);
 
-
+gint       xfce_appfinder_window_ask_if_sandboxing (GarconMenuItem       *item,
+                                                    const gchar          *command,
+                                                    GdkScreen            *screen,
+                                                    XfceAppfinderWindow  *window);
 
 G_END_DECLS
 

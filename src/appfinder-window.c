@@ -27,6 +27,8 @@
 #include <errno.h>
 #endif
 
+#include <stdlib.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -249,6 +251,7 @@ xfce_appfinder_update_button_labels (XfceAppfinderWindow *window)
 
       /* get corresponding Garcon item and check if sandboxed */
       item = xfce_appfinder_model_get_item_for_command (window->model, cmd);
+      g_free (cmd);
       if (item && garcon_menu_item_get_sandboxed (item))
         {
           /* make explicit reference to fact that app is sandboxed */
@@ -282,6 +285,14 @@ xfce_appfinder_update_button_labels (XfceAppfinderWindow *window)
       /* basic button makes explicit reference to secure workspace */
       gchar *label = g_strdup_printf (_("La_unch in Secure Workspace %d"), active_n + 1);
       gchar *ws_name = xfce_workspace_get_workspace_name (active_n);
+
+      /* deal with workspace changes when in the profile selection mode of "Launch with Sanndbox" */
+      if (gtk_widget_get_visible (window->button_launch_sandboxed_back))
+        {
+          gtk_button_clicked (GTK_BUTTON (window->button_launch_sandboxed_back));
+          gtk_widget_set_visible (window->button_launch_sandboxed, FALSE);
+        }
+
       gtk_button_set_label (GTK_BUTTON (window->button_launch), label);
       g_free (label);
       image = gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON);
@@ -1905,6 +1916,132 @@ populate_profile_box (GtkWidget *widget)
 
 
 
+gint
+xfce_appfinder_window_ask_if_sandboxing (GarconMenuItem       *item,
+                                         const gchar          *command,
+                                         GdkScreen            *screen,
+                                         XfceAppfinderWindow  *window)
+{
+  GtkWidget     *dialog;
+  gint           response;
+  GtkWidget     *vbox;
+  GtkWidget     *label;
+  gchar         *title;
+  gchar         *string;
+  const gchar   *name;
+  const gchar   *exec;
+
+  //TODO if proper Xfconf key set, return that we will launch
+
+  appfinder_return_val_if_fail (GARCON_IS_MENU_ITEM (item), FALSE);
+  appfinder_return_val_if_fail (GDK_IS_SCREEN (screen), FALSE);
+  appfinder_return_val_if_fail (!window || XFCE_IS_APPFINDER_WINDOW (window), FALSE);
+
+  name = garcon_menu_item_get_name (item);
+  exec = garcon_menu_item_get_command (item);
+  if (xfce_client_is_xfce (exec))
+    return APPFINDER_LAUNCH_RESPONSE;
+
+  /* Create the dialog */
+  title = g_strdup_printf (_("Launch %s inside a sandbox?"), name);
+  dialog = xfce_security_dialog_new (screen, title);
+  g_free (title);
+
+  xfce_security_dialog_add_button (XFCE_SECURITY_DIALOG (dialog),
+                                   _("_Configure Sandbox"),
+                                   "firejail", "firejail-run",
+                                   APPFINDER_CONF_SANDBOX_RESPONSE,
+                                   FALSE, FALSE);
+
+  title = g_strdup_printf (_("Launch %s"), name);
+  xfce_security_dialog_add_button (XFCE_SECURITY_DIALOG (dialog),
+                                   title,
+                                   garcon_menu_item_get_icon_name (item), "gtk-execute",
+                                   APPFINDER_LAUNCH_RESPONSE,
+                                   FALSE, TRUE);
+  g_free (title);
+
+  /* Top widget area */
+  vbox = gtk_vbox_new (FALSE, 6);
+  gtk_widget_show (vbox);
+
+  string = g_strdup_printf (_("Sandboxes increase security, and they help you control how %s accesses your documents and uses your Internet resources."), name);
+  label = gtk_label_new (string);
+  g_free (string);
+
+  gtk_misc_set_alignment (GTK_MISC (label), 0.00, 0.50);
+  gtk_label_set_use_markup (GTK_LABEL (label), TRUE);
+  gtk_label_set_line_wrap (GTK_LABEL (label), TRUE);
+  gtk_box_pack_start (GTK_BOX (vbox), label, FALSE, FALSE, 0);
+
+  xfce_security_dialog_set_top_widget (XFCE_SECURITY_DIALOG (dialog), vbox);
+  gtk_widget_show (label);
+
+  /* Bottom widget area */
+  vbox = gtk_vbox_new (FALSE, 6);
+  gtk_widget_show (vbox);
+
+  string = g_strdup_printf (_("<small>This dialog will not be shown again for %s. You can change sandbox settings later by editing the %s launcher.</small>"), name, name);
+  label = gtk_label_new (string);
+  g_free (string);
+  gtk_misc_set_alignment (GTK_MISC (label), 0.00, 0.50);
+  gtk_label_set_line_wrap (GTK_LABEL (label), TRUE);
+  gtk_label_set_use_markup (GTK_LABEL (label), TRUE);
+  gtk_box_pack_start (GTK_BOX (vbox), label, FALSE, FALSE, 0);
+
+  xfce_security_dialog_set_bottom_widget (XFCE_SECURITY_DIALOG (dialog), vbox);
+  gtk_widget_show (label);
+
+  //TODO set a bottom widget to permanently block this function (sets xfconf key)
+
+  /* Run the widget now */
+  response = xfce_security_dialog_run (GTK_DIALOG (dialog));
+  gtk_widget_destroy (dialog);
+
+  /* If asked to configure a sandbox, wait a moment before running the app */
+  if (response == APPFINDER_CONF_SANDBOX_RESPONSE)
+    {
+      GFile     *file  = garcon_menu_item_get_file (item);
+      GError    *error = NULL;
+      gchar    **argv;
+
+      if (!file)
+        {
+          xfce_dialog_show_error_manual (window ? GTK_WINDOW (window) : NULL, _("Could not find corresponding desktop file"),
+                                  _("Failed to launch desktop item editor"));
+          response = GTK_RESPONSE_CANCEL;
+        }
+      else
+        {
+          gsize index = 0;
+          argv = g_malloc0 (sizeof (gchar *) * (6));
+          argv[index++] = g_strdup ("exo-desktop-item-edit");
+          argv[index++] = g_strdup ("--edit-sandbox");
+          argv[index++] = g_strdup_printf ("--launch-after-edit=%s", command);
+          if (window)
+            argv[index++] = g_strdup_printf ("--xid=0x%x", APPFINDER_WIDGET_XID (window));
+          argv[index++] = g_file_get_path (file);
+          argv[index++] = NULL;
+
+          g_spawn_async (NULL, argv, environ, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
+          g_strfreev (argv);
+          g_object_unref (file);
+
+          if (error)
+            {
+              xfce_dialog_show_error (window ? GTK_WINDOW (window) : NULL, error,
+                                      _("Failed to launch desktop item editor"));
+              g_error_free (error);
+              response = GTK_RESPONSE_CANCEL;
+            }
+        }
+    }
+
+  return response;
+}
+
+
+
 static gboolean
 xfce_appfinder_window_execute_command (const gchar          *text,
                                        gboolean              sandboxed,
@@ -1917,10 +2054,13 @@ xfce_appfinder_window_execute_command (const gchar          *text,
 {
   gboolean  succeed = FALSE;
   gchar    *action_cmd = NULL;
+  gchar    *space;
+  gchar    *short_command;
   gchar    *expanded;
   gchar    *sandbox_expanded;
   gboolean  sandboxed_app;
   gboolean  secure_ws = xfce_workspace_is_active_secure (screen);
+  gboolean  launch_no_longer_needed = FALSE;
 
   appfinder_return_val_if_fail (error != NULL && *error == NULL, FALSE);
   appfinder_return_val_if_fail (GDK_IS_SCREEN (screen), FALSE);
@@ -1943,13 +2083,55 @@ xfce_appfinder_window_execute_command (const gchar          *text,
   else if (only_custom_cmd)
     return FALSE;
 
+  /* check if the command is a composite */
+  space = strchr (text, ' ');
+  short_command = space ? g_strndup (text, space - text) : NULL;
+
+  /* if it's the first time we see this command, ask the user if the app should be sandboxed */
+  if (!action_cmd && !sandboxed && !secure_ws && !sandboxed_app)
+    {
+      GarconMenuItem *item = xfce_appfinder_model_get_item_for_command (window->model, text);
+      if (!item && short_command)
+        item = xfce_appfinder_model_get_item_for_command (window->model, short_command);
+
+      /* if there is an app for this command, and we've never asked before, ask now */
+      if (item && !xfce_appfinder_model_app_history_contains (window->model, item))
+        {
+          gint response = xfce_appfinder_window_ask_if_sandboxing (item, text, screen, window);
+
+          /* The user cancelled, we'll need to remember to ask again next time */
+          if (response == GTK_RESPONSE_CANCEL || response == GTK_RESPONSE_DELETE_EVENT)
+            {
+              if (save_cmd)
+                *save_cmd = FALSE;
+              launch_no_longer_needed = TRUE;
+            }
+          else
+            xfce_appfinder_model_save_application (window->model, item, NULL);
+
+          /* The exo desktop item editor will be in charge of spawning the app */
+          sandboxed_app = (response == APPFINDER_CONF_SANDBOX_RESPONSE);
+          if (sandboxed_app)
+            launch_no_longer_needed = TRUE;
+        }
+
+      if (item)
+        g_object_unref (item);
+    }
+
+  /* if the user cancelled or the launcher editor takes care of the launch for us, abort */
+  g_free (short_command);
+  if (launch_no_longer_needed)
+    return TRUE;
+
+  /* start preparing the launch of the command */
   if (IS_STRING (text))
     {
       /* expand variables */
       expanded = xfce_expand_variables (text, NULL);
 
       /* spawn the command */
-      APPFINDER_DEBUG ("spawn \"%s\"%s", expanded, sandboxed? " sandboxed":"");
+      APPFINDER_DEBUG ("spawn \"%s\"%s", expanded, sandboxed? " sandboxed": sandboxed_app? " as a sandboxed app":"");
       if (sandboxed_app)
         {
           GarconMenuItem *item = xfce_appfinder_model_get_item_for_command (window->model, text);

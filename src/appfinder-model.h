@@ -95,7 +95,15 @@ gboolean             xfce_appfinder_model_save_command           (XfceAppfinderM
                                                                   const gchar               *command,
                                                                   GError                   **error);
 
+
+gboolean             xfce_appfinder_model_save_application       (XfceAppfinderModel        *model,
+                                                                  GarconMenuItem            *item,
+                                                                  GError                   **error);
+
 GdkPixbuf           *xfce_appfinder_model_get_icon_for_command   (XfceAppfinderModel        *model,
+                                                                  const gchar               *command);
+
+gboolean             xfce_appfinder_model_check_command_seen     (XfceAppfinderModel        *model,
                                                                   const gchar               *command);
 
 GarconMenuItem      *xfce_appfinder_model_get_item_for_command   (XfceAppfinderModel        *model,
@@ -110,6 +118,11 @@ gchar               *xfce_appfinder_model_prep_sandboxed_app_arg (GarconMenuItem
 void                 xfce_appfinder_model_icon_theme_changed     (XfceAppfinderModel        *model);
 
 void                 xfce_appfinder_model_history_clear          (XfceAppfinderModel        *model);
+
+void                 xfce_appfinder_model_app_history_clear      (XfceAppfinderModel        *model);
+
+gboolean             xfce_appfinder_model_app_history_contains   (XfceAppfinderModel  *model,
+                                                                  GarconMenuItem      *item);
 
 gboolean             xfce_appfinder_model_bookmark_toggle        (XfceAppfinderModel        *model,
                                                                   const gchar               *desktop_id,
