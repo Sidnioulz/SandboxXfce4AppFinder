@@ -41,7 +41,10 @@ static void xfce_appfinder_preferences_response          (GtkWidget             
                                                           XfceAppfinderPreferences *preferences);
 static void xfce_appfinder_preferences_beside_sensitive  (GtkWidget                *show_icons,
                                                           GtkWidget                *text_beside_icon);
+static void xfce_appfinder_preferences_offer_to_sandbox_toggled (GtkWidget         *button,
+                                                          gpointer                  user_data);
 static void xfce_appfinder_preferences_clear_history     (XfceAppfinderPreferences *preferences);
+static void xfce_appfinder_preferences_clear_app_history (XfceAppfinderPreferences *preferences);
 static void xfce_appfinder_preferences_action_add        (XfceAppfinderPreferences *preferences);
 static void xfce_appfinder_preferences_action_remove     (GtkWidget                *button,
                                                           XfceAppfinderPreferences *preferences);
@@ -99,6 +102,8 @@ xfce_appfinder_preferences_init (XfceAppfinderPreferences *preferences)
   GObject     *object;
   GtkTreePath *path;
   GObject     *icons;
+  GObject     *show_sb;
+  GObject     *offer_sb;
 
   preferences->channel = xfconf_channel_get ("xfce4-appfinder");
 
@@ -135,6 +140,18 @@ xfce_appfinder_preferences_init (XfceAppfinderPreferences *preferences)
       G_CALLBACK (xfce_appfinder_preferences_beside_sensitive), object);
   xfce_appfinder_preferences_beside_sensitive (GTK_WIDGET (icons), GTK_WIDGET (object));
 
+  show_sb = gtk_builder_get_object (GTK_BUILDER (preferences), "show-sandboxed");
+  xfconf_g_property_bind (preferences->channel, "/show-sandboxed", G_TYPE_BOOLEAN,
+                          G_OBJECT (show_sb), "active");
+
+  offer_sb = gtk_builder_get_object (GTK_BUILDER (preferences), "offer-to-sandbox");
+  xfconf_g_property_bind (preferences->channel, "/offer-to-sandbox", G_TYPE_BOOLEAN,
+                          G_OBJECT (offer_sb), "active");
+
+  g_signal_connect (G_OBJECT (offer_sb), "toggled",
+      G_CALLBACK (xfce_appfinder_preferences_offer_to_sandbox_toggled), NULL);
+  xfce_appfinder_preferences_offer_to_sandbox_toggled (GTK_WIDGET (offer_sb), NULL);
+
   object = gtk_builder_get_object (GTK_BUILDER (preferences), "item-icon-size");
   gtk_combo_box_set_active (GTK_COMBO_BOX (object), XFCE_APPFINDER_ICON_SIZE_DEFAULT_ITEM);
   xfconf_g_property_bind (preferences->channel, "/item-icon-size", G_TYPE_UINT,
@@ -148,6 +165,10 @@ xfce_appfinder_preferences_init (XfceAppfinderPreferences *preferences)
   object = gtk_builder_get_object (GTK_BUILDER (preferences), "button-clear");
   g_signal_connect_swapped (G_OBJECT (object), "clicked",
       G_CALLBACK (xfce_appfinder_preferences_clear_history), preferences);
+
+  object = gtk_builder_get_object (GTK_BUILDER (preferences), "button-clear-app");
+  g_signal_connect_swapped (G_OBJECT (object), "clicked",
+      G_CALLBACK (xfce_appfinder_preferences_clear_app_history), preferences);
 
   object = gtk_builder_get_object (GTK_BUILDER (preferences), "button-add");
   g_signal_connect_swapped (G_OBJECT (object), "clicked",
@@ -210,6 +231,16 @@ xfce_appfinder_preferences_beside_sensitive (GtkWidget *show_icons,
 
 
 static void
+xfce_appfinder_preferences_offer_to_sandbox_toggled (GtkWidget *button,
+                                                     gpointer   user_data)
+{
+  XfceAppfinderModel *model = xfce_appfinder_model_get ();
+  xfce_appfinder_model_set_app_history_in_use (model, gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (button)));
+}
+
+
+
+static void
 xfce_appfinder_preferences_clear_history (XfceAppfinderPreferences *preferences)
 {
   XfceAppfinderModel *model;
@@ -222,6 +253,25 @@ xfce_appfinder_preferences_clear_history (XfceAppfinderPreferences *preferences)
     {
       model = xfce_appfinder_model_get ();
       xfce_appfinder_model_history_clear (model);
+      g_object_unref (G_OBJECT (model));
+    }
+}
+
+
+
+static void
+xfce_appfinder_preferences_clear_app_history (XfceAppfinderPreferences *preferences)
+{
+  XfceAppfinderModel *model;
+
+  appfinder_return_if_fail (XFCE_IS_APPFINDER_PREFERENCES (preferences));
+
+  if (xfce_dialog_confirm (GTK_WINDOW (preferences->dialog), GTK_STOCK_CLEAR, _("C_lear"),
+                           _("This will permanently clear the list of previously launched applications. You will be asked again if you want to sandbox those applications upon launching them."),
+                           _("Are you sure you want to clear the application launch history?")))
+    {
+      model = xfce_appfinder_model_get ();
+      xfce_appfinder_model_app_history_clear (model);
       g_object_unref (G_OBJECT (model));
     }
 }

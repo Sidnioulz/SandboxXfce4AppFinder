@@ -270,7 +270,8 @@ xfce_appfinder_update_button_labels (XfceAppfinderWindow *window)
           gtk_button_set_image (GTK_BUTTON (window->button_launch), image);
 
           /* add an explicit "Launch in Sandbox" button */
-          gtk_widget_set_visible (window->button_launch_sandboxed, TRUE);
+          gtk_widget_set_visible (window->button_launch_sandboxed,
+                xfconf_channel_get_bool (window->channel, "/show-sandboxed", TRUE));
         }
 
       if (item)
@@ -633,7 +634,7 @@ xfce_appfinder_window_init (XfceAppfinderWindow *window)
   g_signal_connect_swapped (G_OBJECT (button), "clicked",
       G_CALLBACK (xfce_appfinder_window_launch_sandboxed_clicked), window);
   gtk_widget_set_sensitive (button, FALSE);
-  gtk_widget_show (button);
+  gtk_widget_set_visible (button, xfconf_channel_get_bool (window->channel, "/show-sandboxed", TRUE));
 
   image = gtk_image_new_from_icon_name ("firejail-run", GTK_ICON_SIZE_BUTTON);
   gtk_button_set_image (GTK_BUTTON (button), image);
@@ -830,7 +831,7 @@ xfce_appfinder_window_window_state_event (GtkWidget           *widget,
 static void
 xfce_appfinder_window_set_item_width (XfceAppfinderWindow *window)
 {
-  gint                   width;
+  gint                   width = 16;
   XfceAppfinderIconSize  icon_size;
   GtkOrientation         item_orientation = GTK_ORIENTATION_VERTICAL;
   GList                 *renderers;
@@ -1807,6 +1808,10 @@ xfce_appfinder_window_property_changed (XfconfChannel       *channel,
       if (GTK_IS_ICON_VIEW (window->view))
         xfce_appfinder_window_set_item_width (window);
     }
+  else if (g_strcmp0 (prop, "/show-sandboxed") == 0)
+    {
+      xfce_appfinder_update_button_labels (window);
+    }
 }
 
 
@@ -1931,13 +1936,13 @@ xfce_appfinder_window_ask_if_sandboxing (GarconMenuItem       *item,
   const gchar   *name;
   const gchar   *exec;
 
-  //TODO if proper Xfconf key set, return that we will launch
-
   appfinder_return_val_if_fail (GARCON_IS_MENU_ITEM (item), FALSE);
   appfinder_return_val_if_fail (GDK_IS_SCREEN (screen), FALSE);
   appfinder_return_val_if_fail (!window || XFCE_IS_APPFINDER_WINDOW (window), FALSE);
 
   name = garcon_menu_item_get_name (item);
+
+  /* Ignore Xfce clients */
   exec = garcon_menu_item_get_command (item);
   if (xfce_client_is_xfce (exec))
     return APPFINDER_LAUNCH_RESPONSE;
@@ -1991,8 +1996,6 @@ xfce_appfinder_window_ask_if_sandboxing (GarconMenuItem       *item,
 
   xfce_security_dialog_set_bottom_widget (XFCE_SECURITY_DIALOG (dialog), vbox);
   gtk_widget_show (label);
-
-  //TODO set a bottom widget to permanently block this function (sets xfconf key)
 
   /* Run the widget now */
   response = xfce_security_dialog_run (GTK_DIALOG (dialog));
@@ -2058,7 +2061,7 @@ xfce_appfinder_window_execute_command (const gchar          *text,
   gchar    *short_command;
   gchar    *expanded;
   gchar    *sandbox_expanded;
-  gboolean  sandboxed_app;
+  gboolean  sandboxed_app = FALSE;
   gboolean  secure_ws = xfce_workspace_is_active_secure (screen);
   gboolean  launch_no_longer_needed = FALSE;
 

@@ -157,6 +157,7 @@ struct _XfceAppfinderModel
   GFileMonitor          *app_history_monitor;
   GFile                 *app_history_file;
   guint64                app_history_mtime;
+  gboolean               app_history_in_use;
 
   XfceAppfinderIconSize  icon_size;
 };
@@ -244,6 +245,7 @@ xfce_appfinder_model_init (XfceAppfinderModel *model)
   model->stamp = g_random_int ();
   model->items_hash = g_hash_table_new (g_str_hash, g_str_equal);
   model->app_history = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  model->app_history_in_use = TRUE;
   model->bookmarks_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   model->icon_size = XFCE_APPFINDER_ICON_SIZE_DEFAULT_ITEM;
   model->command_icon = xfce_appfinder_model_load_pixbuf (GTK_STOCK_EXECUTE, model->icon_size);
@@ -2287,12 +2289,27 @@ xfce_appfinder_model_app_history_contains (XfceAppfinderModel  *model,
   appfinder_return_val_if_fail (XFCE_IS_APPFINDER_MODEL (model), FALSE);
   appfinder_return_val_if_fail (GARCON_IS_MENU_ITEM (item), FALSE);
 
+  /* Hack to avoid having to access the XfconfChannel everywhere where we ask to sandbox */
+  if (model->app_history_in_use == FALSE)
+    return TRUE;
+
   desktop_id = garcon_menu_item_get_desktop_id (item);
 
   if (g_hash_table_lookup (model->app_history, desktop_id) != NULL)
     return TRUE;
   else
     return FALSE;
+}
+
+
+
+void
+xfce_appfinder_model_set_app_history_in_use (XfceAppfinderModel  *model,
+                                             gboolean             in_use)
+{
+  appfinder_return_if_fail (XFCE_IS_APPFINDER_MODEL (model));
+
+  model->app_history_in_use = in_use;
 }
 
 
@@ -2833,7 +2850,7 @@ xfce_appfinder_model_bookmark_toggle (XfceAppfinderModel  *model,
   static gsize  old_len = 0;
   GString      *contents;
   gchar        *filename;
-  gboolean      succeed;
+  gboolean      succeed = FALSE;
   GtkTreePath  *path;
   gint          idx;
   GtkTreeIter   iter;

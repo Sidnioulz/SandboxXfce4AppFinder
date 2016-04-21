@@ -121,8 +121,11 @@ void                 xfce_appfinder_model_history_clear          (XfceAppfinderM
 
 void                 xfce_appfinder_model_app_history_clear      (XfceAppfinderModel        *model);
 
-gboolean             xfce_appfinder_model_app_history_contains   (XfceAppfinderModel  *model,
-                                                                  GarconMenuItem      *item);
+gboolean             xfce_appfinder_model_app_history_contains   (XfceAppfinderModel        *model,
+                                                                  GarconMenuItem            *item);
+
+void                 xfce_appfinder_model_set_app_history_in_use (XfceAppfinderModel        *model,
+                                                                  gboolean                   in_use);
 
 gboolean             xfce_appfinder_model_bookmark_toggle        (XfceAppfinderModel        *model,
                                                                   const gchar               *desktop_id,
